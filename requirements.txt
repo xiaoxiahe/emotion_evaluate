@@ -1,22 +1,22 @@
 # Core app
-streamlit>=1.36.0
+streamlit==1.36.0
 
 # Data & metrics
-pandas>=2.0.0
-numpy>=1.24.0
-scikit-learn>=1.3.0
-openpyxl>=3.1.0
+pandas==2.2.2
+numpy==1.26.4            # 避免 numpy 2.0 引发的二进制兼容问题
+scikit-learn==1.4.2
+openpyxl==3.1.5
 
 # Volcengine Ark SDK (Doubao)
-volcenginesdk-ark-runtime>=0.1.0
+volcenginesdk-ark-runtime==0.1.0
 
 # Speech recognition (Whisper, CPU int8)
-faster-whisper>=1.0.0
-ctranslate2>=4.3.0
-huggingface-hub>=0.22.0
-tokenizers>=0.15.0
-sentencepiece>=0.1.99
+ctranslate2==4.4.0
+huggingface-hub==0.23.5
+tokenizers==0.15.2       # 选择有 manylinux 预编译轮子的版本
+sentencepiece==0.1.99
+faster-whisper==1.0.3
 
-# Optional helpers for audio/ffmpeg invocation (ffmpeg binary still required on system PATH)
-soundfile>=0.12.1
-pydub>=0.25.1
+# Optional audio helpers
+soundfile==0.12.1
+pydub==0.25.1
