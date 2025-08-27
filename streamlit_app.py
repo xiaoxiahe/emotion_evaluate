@@ -80,6 +80,24 @@ def fast_transcribe_audio(audio_path: str) -> Optional[str]:
         return None
 
 
+def try_init_ark_sdk() -> None:
+    """尝试初始化 Ark SDK，在启动时检查可用性并记录状态。"""
+    if st.session_state.get('ark_initialized'):
+        return
+    try:
+        from volcenginesdkarkruntime import Ark  # type: ignore
+        api_key = os.environ.get("ARK_API_KEY")
+        if not api_key:
+            st.session_state['ark_available'] = False
+        else:
+            _ = Ark(api_key=api_key, timeout=30)
+            st.session_state['ark_available'] = True
+    except Exception:
+        st.session_state['ark_available'] = False
+    finally:
+        st.session_state['ark_initialized'] = True
+
+
 def run_batch_auto_test(excel_path: str) -> Dict[str, Any]:
     if not os.path.exists(excel_path):
         raise FileNotFoundError(f"Excel 文件不存在: {excel_path}")
@@ -176,8 +194,9 @@ def run_single_test(image_path: Optional[str], audio_path: Optional[str], overri
 def main():
     st.title("多模态情绪识别演示")
     
-    # 在界面启动时预加载语音转文本模型
-    with st.spinner("正在加载语音转文本模型..."):
+    # 在界面启动时预加载 Ark SDK 与语音转文本模型
+    with st.spinner("正在加载依赖与模型..."):
+        try_init_ark_sdk()
         fast_stt_model = load_fast_stt_model()
         # 将模型存储在session_state中，供后续使用
         st.session_state['fast_stt_model'] = fast_stt_model
@@ -223,7 +242,8 @@ def main():
         
         # 显示模型状态
         model_status = "✅ 快速模型已加载" if st.session_state.get('fast_stt_model') else "⚠️ 使用备用模型"
-        st.info(f"语音转文本模型状态: {model_status}")
+        ark_status = "✅ Ark 可用" if st.session_state.get('ark_available') else "⚠️ Ark 不可用（使用回退）"
+        st.info(f"语音转文本模型状态: {model_status} | 大模型: {ark_status}")
         
         col_left, col_right = st.columns([1,1])
         with col_left:
