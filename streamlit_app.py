@@ -253,24 +253,30 @@ def main():
             if img_file is not None:
                 st.image(img_file, caption="上传的图片", width=280)
         with col_right:
-            wav_file = st.file_uploader("🎵 上传音频", type=["wav", "mp3", "m4a", "flac"]) 
+            # 将“上传音频”和“或者录音”并排放置
+            a1, a2 = st.columns([1,1])
+            with a1:
+                wav_file = st.file_uploader("🎵 上传音频", type=["wav", "mp3", "m4a", "flac"]) 
+            # 可选：使用麦克风直接录音（与上传音频并排）
+            rec_tmp_path = None
+            with a2:
+                if mic_recorder is not None:
+                    st.caption("或者录音")
+                    rec = mic_recorder(start_prompt="开始录音", stop_prompt="停止录音", format="wav", key="mic_recorder")
+                    if rec and isinstance(rec, dict) and rec.get("bytes"):
+                        st.audio(rec["bytes"])
+                        try:
+                            with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmprec:
+                                tmprec.write(rec["bytes"])
+                                rec_tmp_path = tmprec.name
+                        except Exception:
+                            rec_tmp_path = None
+
             override_text = st.text_area("📝 可选：直接输入文本（将跳过语音转写）", 
                                        placeholder="在这里输入文本内容...", 
                                        height=120)
 
-        # 可选：使用麦克风直接录音
-        rec_tmp_path = None
-        if mic_recorder is not None:
-            st.markdown("#### 或者：直接录音")
-            rec = mic_recorder(start_prompt="开始录音", stop_prompt="停止录音", format="wav", key="mic_recorder")
-            if rec and isinstance(rec, dict) and rec.get("bytes"):
-                st.audio(rec["bytes"])
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmprec:
-                        tmprec.write(rec["bytes"])
-                        rec_tmp_path = tmprec.name
-                except Exception:
-                    rec_tmp_path = None
+        # rec_tmp_path 已在右侧列内设置（若使用录音）
 
         b1, b2, _ = st.columns([1,1,6])
         with b1:
