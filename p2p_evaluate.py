@@ -68,10 +68,15 @@ def predict_visual(image_path: str) -> str:
 
 
 def predict_visual_detail(image_path: str) -> Tuple[str, str, float]:
-    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。"""
+    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。
+    若 Ark SDK 不可用，直接返回安全的默认值以保证在 Cloud 正常运行。
+    """
     try:
         import base64
-        from volcenginesdkarkruntime import Ark
+        try:
+            from volcenginesdkarkruntime import Ark  # type: ignore
+        except Exception:
+            return "NEUTRAL", "Ark SDK 不可用，使用默认结果", 0.0
 
         # 与 emotion_based_visual 中一致的配置
         model_name = 'doubao_1_6_flash'
@@ -189,7 +194,11 @@ def transcribe_audio_to_text(audio_path: str) -> Optional[str]:
 def predict_text(text: str) -> str:
     # 复用 emotion_based_text 的客户端与提示，拿到 emotion 字段
     # 为降低耗时，这里使用模块级复用的 Ark 客户端
-    from volcenginesdkarkruntime import Ark
+    try:
+        from volcenginesdkarkruntime import Ark  # type: ignore
+    except Exception:
+        # 安全回退：无法访问 Ark 时，返回 NEUTRAL
+        return "NEUTRAL"
     import os as _os
 
     global _ARK_CLIENT
@@ -227,8 +236,13 @@ def predict_text(text: str) -> str:
 
 
 def predict_text_detail(text: str) -> Tuple[str, str, float]:
-    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。"""
-    from volcenginesdkarkruntime import Ark
+    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。
+    若 Ark SDK 不可用，直接返回安全的默认值以保证在 Cloud 正常运行。
+    """
+    try:
+        from volcenginesdkarkruntime import Ark  # type: ignore
+    except Exception:
+        return "NEUTRAL", "Ark SDK 不可用，使用默认结果", 0.0
     import os as _os
 
     global _ARK_CLIENT

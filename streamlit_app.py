@@ -170,28 +170,8 @@ def run_single_test(image_path: Optional[str], audio_path: Optional[str], overri
     }
 
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-def _ensure_abs_path(path: str) -> str:
-    """Return absolute path; if relative, resolve relative to this file directory."""
-    if not path:
-        return path
-    return path if os.path.isabs(path) else os.path.join(APP_DIR, path)
-
-
 def main():
     st.set_page_config(page_title="多模态情绪识别演示", layout="wide")
-    # 强制启用页面滚动（Cloud 有时出现 overflow 限制）
-    st.markdown(
-        """
-        <style>
-        html, body, [data-testid="stAppViewContainer"] { overflow: auto !important; }
-        [data-testid="stVerticalBlock"] { overflow: visible !important; }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
     st.title("多模态情绪识别演示")
     
     # 在界面启动时预加载语音转文本模型
@@ -210,27 +190,26 @@ def main():
         c1, c2, _ = st.columns([4, 1, 6])
         with c1:
             if choice == "简单（50条）":
-                excel_path = os.path.join(APP_DIR, "multimodal_emotion_data_50.xlsx")
+                excel_path = os.path.join(".", "multimodal_emotion_data_50.xlsx")
                 st.text_input("Excel 路径", value=excel_path, disabled=True)
             elif choice == "完整（196条）":
-                excel_path = os.path.join(APP_DIR, "multimodal_emotion_data_196.xlsx")
+                excel_path = os.path.join(".", "multimodal_emotion_data_196.xlsx")
                 st.text_input("Excel 路径", value=excel_path, disabled=True)
             else:
-                default_path = _ensure_abs_path(DEFAULT_EXCEL_PATH)
-                excel_path = st.text_input("Excel 路径", value=default_path)
+                excel_path = st.text_input("Excel 路径", value=DEFAULT_EXCEL_PATH)
         with c2:
             run_btn = st.button("开始自动测试", type="primary")
         if run_btn:
             try:
-                res = run_batch_auto_test(_ensure_abs_path(excel_path))
+                res = run_batch_auto_test(excel_path)
                 st.success(f"样本数: {res['total']} | 准确率: {res['accuracy']:.4f} | 总耗时: {res['elapsed']:.2f}s | 平均单条: {res['avg_time']:.3f}s | 50分位: {res['p50_time']:.3f}s | 95分位: {res['p95_time']:.3f}s")
 
                 st.write("每类召回率：")
                 pc_df = pd.DataFrame({"label": list(res["per_class"].keys()), "recall": list(res["per_class"].values())})
-                st.dataframe(pc_df, width='stretch', height=140)
+                st.dataframe(pc_df, use_container_width=True, height=140)
 
                 out_df = pd.DataFrame(res["records"]).sort_values("ID")
-                st.dataframe(out_df, width='stretch', height=300)
+                st.dataframe(out_df, use_container_width=True, height=300)
 
                 csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载结果 CSV", data=csv_bytes, file_name="batch_results.csv", mime="text/csv")
