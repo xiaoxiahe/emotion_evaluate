@@ -76,16 +76,29 @@ def predict_visual_detail(image_path: str) -> Tuple[str, str, float]:
     )
     try:
         t0 = time.time()
-        resp = ark_chat_json(
-            model="doubao-seed-1-6-flash-250715",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt},
-                    {"type": "image_url", "image_url": {"url": image_to_data_url(image_path)}},
-                ],
-            }],
-        )
+        # 增加超时与简易重试，提升移动端体验
+        max_retries = 2
+        last_err = None
+        resp = None
+        for _ in range(max_retries + 1):
+            try:
+                resp = ark_chat_json(
+                    model="doubao-seed-1-6-flash-250715",
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {"type": "image_url", "image_url": {"url": image_to_data_url(image_path)}},
+                        ],
+                    }],
+                    timeout=40,
+                )
+                break
+            except Exception as e:
+                last_err = e
+                time.sleep(0.8)
+        if resp is None:
+            raise last_err or RuntimeError("视觉大模型无响应")
         duration = time.time() - t0
         content = resp["choices"][0]["message"].get("content")
         obj = json.loads(content) if isinstance(content, str) else (content if isinstance(content, dict) else {"result": "NEUTRAL"})

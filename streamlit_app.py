@@ -263,6 +263,9 @@ def main():
         ark_status = "✅ Ark 可用" if st.session_state.get('ark_available') else "⚠️ Ark 不可用（使用回退）"
         st.info(f"语音转文本模型状态: {model_status} | 大模型: {ark_status}")
         
+        # 仅文本模式可在弱网/移动端时跳过视觉模型
+        only_text = st.checkbox("仅文本模式（跳过视觉识别）", value=False)
+
         col_left, col_right = st.columns([1,1])
         with col_left:
             img_file = st.file_uploader("📷 上传图片", type=["jpg", "jpeg", "png"])
@@ -314,7 +317,9 @@ def main():
                         st.caption(f"图片已保存: {tmp_img} ({os.path.getsize(tmp_img)} bytes)")
                     if tmp_wav and os.path.exists(tmp_wav):
                         st.caption(f"音频已保存: {tmp_wav} ({os.path.getsize(tmp_wav)} bytes)")
-                    res = run_single_test(tmp_img, tmp_wav, override_text=override_text)
+                    # 若勾选仅文本模式，则不传图片路径
+                    img_arg = None if only_text else tmp_img
+                    res = run_single_test(img_arg, tmp_wav, override_text=override_text)
                 finally:
                     # 清理临时文件
                     if tmp_img and os.path.exists(tmp_img):

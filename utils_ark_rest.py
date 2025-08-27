@@ -34,17 +34,30 @@ def ark_chat_json(model: str, messages: List[Dict[str, Any]], temperature: float
 
 
 def image_to_data_url(path: str) -> str:
-    # 根据扩展名推断 MIME，默认 jpeg
-    ext = os.path.splitext(path)[1].lower()
-    mime = "image/jpeg"
-    if ext in [".png"]:
-        mime = "image/png"
-    elif ext in [".gif"]:
-        mime = "image/gif"
-    elif ext in [".webp"]:
-        mime = "image/webp"
-    with open(path, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
+    """将图片压缩为较小尺寸再以 data URL 返回，减少大模型入参体积。
+    - 最长边压到 768px
+    - 统一转 JPEG，质量 80
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as img:
+            img = img.convert("RGB")
+            w, h = img.size
+            max_side = max(w, h)
+            if max_side > 768:
+                scale = 768 / float(max_side)
+                new_size = (int(w * scale), int(h * scale))
+                img = img.resize(new_size)
+            from io import BytesIO
+            buf = BytesIO()
+            img.save(buf, format="JPEG", quality=80, optimize=True)
+            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+            return f"data:image/jpeg;base64,{b64}"
+    except Exception:
+        # 退化为原图直传
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        # 简化：若失败统一按 jpeg 处理
+        return f"data:image/jpeg;base64,{b64}"
 
 
