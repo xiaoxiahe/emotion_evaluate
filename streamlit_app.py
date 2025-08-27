@@ -206,10 +206,10 @@ def main():
 
                 st.write("每类召回率：")
                 pc_df = pd.DataFrame({"label": list(res["per_class"].keys()), "recall": list(res["per_class"].values())})
-                st.dataframe(pc_df, use_container_width=True, height=140)
+                st.dataframe(pc_df, width='stretch', height=140)
 
                 out_df = pd.DataFrame(res["records"]).sort_values("ID")
-                st.dataframe(out_df, use_container_width=True, height=300)
+                st.dataframe(out_df, width='stretch', height=300)
 
                 csv_bytes = out_df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载结果 CSV", data=csv_bytes, file_name="batch_results.csv", mime="text/csv")
