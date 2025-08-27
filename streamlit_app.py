@@ -7,6 +7,10 @@ from typing import Dict, Any, Optional
 
 import pandas as pd
 import streamlit as st
+try:
+    from streamlit_mic_recorder import mic_recorder  # optional mic widget
+except Exception:
+    mic_recorder = None
 
 # 必须在任何 Streamlit 调用前设置页面配置，避免 Cloud 上布局/滚动异常
 st.set_page_config(page_title="多模态情绪识别演示", layout="wide")
@@ -254,13 +258,31 @@ def main():
                                        placeholder="在这里输入文本内容...", 
                                        height=120)
 
+        # 可选：使用麦克风直接录音
+        rec_tmp_path = None
+        if mic_recorder is not None:
+            st.markdown("#### 或者：直接录音")
+            rec = mic_recorder(start_prompt="开始录音", stop_prompt="停止录音", format="wav", key="mic_recorder")
+            if rec and isinstance(rec, dict) and rec.get("bytes"):
+                st.audio(rec["bytes"])
+                try:
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmprec:
+                        tmprec.write(rec["bytes"])
+                        rec_tmp_path = tmprec.name
+                except Exception:
+                    rec_tmp_path = None
+
         b1, b2, _ = st.columns([1,1,6])
         with b1:
             run_single_btn = st.button("🚀 开始单条测试", type="primary")
         if run_single_btn:
             with st.spinner("处理中..."):
                 tmp_img = save_uploaded_file(img_file, suffix=".png") if img_file else None
-                tmp_wav = save_uploaded_file(wav_file, suffix=".wav") if wav_file else None
+                # 录音优先，其次是上传文件
+                if rec_tmp_path:
+                    tmp_wav = rec_tmp_path
+                else:
+                    tmp_wav = save_uploaded_file(wav_file, suffix=".wav") if wav_file else None
 
                 try:
                     res = run_single_test(tmp_img, tmp_wav, override_text=override_text)
@@ -271,7 +293,12 @@ def main():
                             os.remove(tmp_img)
                         except Exception:
                             pass
-                    if tmp_wav and os.path.exists(tmp_wav):
+                    if rec_tmp_path and os.path.exists(rec_tmp_path):
+                        try:
+                            os.remove(rec_tmp_path)
+                        except Exception:
+                            pass
+                    if tmp_wav and os.path.exists(tmp_wav) and tmp_wav != rec_tmp_path:
                         try:
                             os.remove(tmp_wav)
                         except Exception:
