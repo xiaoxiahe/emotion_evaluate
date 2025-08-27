@@ -294,6 +294,38 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
             pass
 
 
+def init_local_logging_storage() -> None:
+    """初始化本地日志存储，避免首次读取/写入时报文件不存在。"""
+    try:
+        # 确保媒体目录存在
+        os.makedirs("logs_media", exist_ok=True)
+        # 确保 NDJSON 文件存在
+        if not os.path.exists("logs.ndjson"):
+            with open("logs.ndjson", "a", encoding="utf-8") as _:
+                pass
+        # 确保 SQLite 表存在
+        conn = sqlite3.connect("logs.db")
+        cur = conn.cursor()
+        cur.execute(
+            """
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp INTEGER,
+                user_mood TEXT,
+                user_note TEXT,
+                override_text TEXT,
+                result_json TEXT,
+                image_path TEXT,
+                audio_path TEXT
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+
 def _load_logs_from_sqlite(limit: int = 200, user_mood: Optional[str] = None, fused_pred: Optional[str] = None):
     if not os.path.exists("logs.db"):
         return None
@@ -395,6 +427,7 @@ def main():
     
     # 在界面启动时预加载 Ark SDK 与语音转文本模型
     with st.spinner("正在加载依赖与模型..."):
+        init_local_logging_storage()
         try_init_ark_sdk()
         fast_stt_model = load_fast_stt_model()
         # 将模型存储在session_state中，供后续使用
@@ -512,6 +545,7 @@ def main():
                     # 清理临时文件
                     # 不立即删除，以便用户在结果页选择后保存记录。
                     # 实际清理发生在“保存记录”动作之后。
+                    pass
 
             # 展示结果（从会话读取，避免交互导致数据丢失）
             res = st.session_state.get('last_result')
