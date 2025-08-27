@@ -448,12 +448,6 @@ def main():
         
         # 仅文本模式可在弱网/移动端时跳过视觉模型
         only_text = st.checkbox("仅文本模式（跳过视觉识别）", value=False)
-        # 让用户填写当下心情
-        mood_col1, mood_col2 = st.columns([1,1])
-        with mood_col1:
-            user_mood = st.selectbox("当下心情（自报）", ["", "ANGRY", "HAPPY", "SAD", "NEUTRAL"], index=0, help="可选")
-        with mood_col2:
-            user_note = st.text_input("备注（可选）", placeholder="补充说明…")
 
         col_left, col_right = st.columns([1,1])
         with col_left:
@@ -509,13 +503,60 @@ def main():
                     # 若勾选仅文本模式，则不传图片路径
                     img_arg = None if only_text else tmp_img
                     res = run_single_test(img_arg, tmp_wav, override_text=override_text)
-                    # 收集并上传日志（图片、文本、音频、实际心情、预测结果、耗时）
+                    # 将结果与临时路径保存到会话，供结果页下方二次确认后再入库
+                    st.session_state['last_result'] = res
+                    st.session_state['last_tmp_image'] = tmp_img
+                    st.session_state['last_tmp_audio'] = tmp_wav
+                    st.session_state['last_override_text'] = override_text
+                finally:
+                    # 清理临时文件
+                    # 不立即删除，以便用户在结果页选择后保存记录。
+                    # 实际清理发生在“保存记录”动作之后。
+
+            # 展示结果（从会话读取，避免交互导致数据丢失）
+            res = st.session_state.get('last_result')
+            if res:
+                st.markdown("### 📊 预测结果")
+                m1, m2, m3 = st.columns(3)
+                m1.metric("👁️ 视觉预测", res["vision_pred"]) 
+                m2.metric("📝 文本预测", res["text_pred"]) 
+                m3.metric("🎯 融合结果", res["fused_pred"]) 
+
+                st.markdown("### 💡 预测原因")
+                r1, r2 = st.columns(2)
+                with r1:
+                    st.info(f"视觉原因：{res.get('vision_reason','') or '无'}")
+                with r2:
+                    st.info(f"文本原因：{res.get('text_reason','') or '无'}")
+
+                st.markdown("### ⏱️ 耗时情况")
+                t1, t2, t3, t4 = st.columns(4)
+                t1.metric("👁️ 视觉用时", f"{res['vision_time_s']:.3f}s")
+                t2.metric("🎵 ASR转写", f"{res['asr_time_s']:.3f}s")
+                t3.metric("📝 文本用时", f"{res['text_time_s']:.3f}s")
+                t4.metric("⚡ 整体(并行)", f"{res['row_time_s']:.3f}s")
+
+                st.markdown("### 🎵 语音转写文本")
+                if res.get("text_content"):
+                    st.success(f"转写结果: {res['text_content']}")
+                else:
+                    st.info("无转写文本")
+
+                # 结果之后再让用户确认当下心情并保存
+                st.markdown("### ✅ 保存本次记录")
+                c1, c2 = st.columns([1,1])
+                with c1:
+                    user_mood = st.selectbox("当下心情（自报）", ["", "ANGRY", "HAPPY", "SAD", "NEUTRAL"], index=0)
+                with c2:
+                    user_note = st.text_input("备注（可选）", placeholder="补充说明…")
+                save_btn = st.button("保存记录")
+                if save_btn:
                     try:
                         payload = {
                             "timestamp": int(time.time()),
-                            "user_mood": user_mood or None,
-                            "user_note": user_note or None,
-                            "override_text": override_text or None,
+                            "user_mood": (user_mood or None),
+                            "user_note": (user_note or None),
+                            "override_text": st.session_state.get('last_override_text'),
                             "result": {
                                 "vision_pred": res.get("vision_pred"),
                                 "text_pred": res.get("text_pred"),
@@ -525,57 +566,24 @@ def main():
                                 "asr_time_s": res.get("asr_time_s"),
                                 "row_time_s": res.get("row_time_s"),
                             },
-                            # 保留临时路径用于本地落盘（避免重复编码大文件）
-                            "__tmp_image_path": tmp_img,
-                            "__tmp_audio_path": tmp_wav,
+                            "__tmp_image_path": st.session_state.get('last_tmp_image'),
+                            "__tmp_audio_path": st.session_state.get('last_tmp_audio'),
                         }
                         upload_data_log(payload)
-                    except Exception:
-                        pass
-                finally:
-                    # 清理临时文件
-                    if tmp_img and os.path.exists(tmp_img):
-                        try:
-                            os.remove(tmp_img)
-                        except Exception:
-                            pass
-                    if rec_tmp_path and os.path.exists(rec_tmp_path):
-                        try:
-                            os.remove(rec_tmp_path)
-                        except Exception:
-                            pass
-                    if tmp_wav and os.path.exists(tmp_wav) and tmp_wav != rec_tmp_path:
-                        try:
-                            os.remove(tmp_wav)
-                        except Exception:
-                            pass
-
-            # 展示结果
-            st.markdown("### 📊 预测结果")
-            m1, m2, m3 = st.columns(3)
-            m1.metric("👁️ 视觉预测", res["vision_pred"]) 
-            m2.metric("📝 文本预测", res["text_pred"]) 
-            m3.metric("🎯 融合结果", res["fused_pred"]) 
-
-            st.markdown("### 💡 预测原因")
-            r1, r2 = st.columns(2)
-            with r1:
-                st.info(f"视觉原因：{res.get('vision_reason','') or '无'}")
-            with r2:
-                st.info(f"文本原因：{res.get('text_reason','') or '无'}")
-
-            st.markdown("### ⏱️ 耗时情况")
-            t1, t2, t3, t4 = st.columns(4)
-            t1.metric("👁️ 视觉用时", f"{res['vision_time_s']:.3f}s")
-            t2.metric("🎵 ASR转写", f"{res['asr_time_s']:.3f}s")
-            t3.metric("📝 文本用时", f"{res['text_time_s']:.3f}s")
-            t4.metric("⚡ 整体(并行)", f"{res['row_time_s']:.3f}s")
-
-            st.markdown("### 🎵 语音转写文本")
-            if res.get("text_content"):
-                st.success(f"转写结果: {res['text_content']}")
-            else:
-                st.info("无转写文本")
+                        # 保存后清理临时文件并清空会话状态
+                        for k in ['last_tmp_image', 'last_tmp_audio']:
+                            p = st.session_state.get(k)
+                            if p and os.path.exists(p):
+                                try:
+                                    os.remove(p)
+                                except Exception:
+                                    pass
+                        for k in ['last_result','last_tmp_image','last_tmp_audio','last_override_text']:
+                            if k in st.session_state:
+                                del st.session_state[k]
+                        st.success("已保存")
+                    except Exception as e:
+                        st.warning(f"保存失败：{e}")
 
     
 
