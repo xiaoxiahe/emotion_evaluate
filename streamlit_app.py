@@ -87,7 +87,14 @@ def fast_transcribe_audio(audio_path: str) -> Optional[str]:
         return final_text if final_text.strip() else None
         
     except Exception as e:
-        st.error(f"❌ 语音转写失败: {e}")
+        hint = ""
+        try:
+            ext = os.path.splitext(audio_path)[1].lower()
+            if ext in [".mp3", ".m4a", ".flac"]:
+                hint = "（可能缺少 ffmpeg，建议安装后重试，或先转为 wav）"
+        except Exception:
+            pass
+        st.error(f"❌ 语音转写失败: {e} {hint}")
         return None
 
 
@@ -212,17 +219,7 @@ def main():
     
     st.success("🚀 系统初始化完成！")
 
-    # 侧边栏提供可动态配置 ARK_API_KEY 的入口，便于移动端/本地环境设置
-    with st.sidebar:
-        st.subheader("设置")
-        current_key_masked = "已设置" if os.environ.get("ARK_API_KEY") else "未设置"
-        st.caption(f"大模型 API Key: {current_key_masked}")
-        with st.expander("配置 Ark API Key", expanded=False):
-            new_key = st.text_input("ARK_API_KEY", type="password", placeholder="输入并点击保存")
-            if st.button("保存 Key") and new_key:
-                os.environ["ARK_API_KEY"] = new_key.strip()
-                st.session_state['ark_available'] = True
-                st.success("已保存 API Key")
+    # 移除 UI 内部设置 ARK_API_KEY 的入口，统一使用环境变量/Secrets
 
     tab1, tab2 = st.tabs(["自动测试", "单条测试（上传图片与音频）"]) 
 
@@ -312,6 +309,11 @@ def main():
                     tmp_wav = save_uploaded_file(wav_file) if wav_file else None
 
                 try:
+                    # 调试：展示服务器端保存的临时文件路径与大小，定位手机端路径相关问题
+                    if tmp_img and os.path.exists(tmp_img):
+                        st.caption(f"图片已保存: {tmp_img} ({os.path.getsize(tmp_img)} bytes)")
+                    if tmp_wav and os.path.exists(tmp_wav):
+                        st.caption(f"音频已保存: {tmp_wav} ({os.path.getsize(tmp_wav)} bytes)")
                     res = run_single_test(tmp_img, tmp_wav, override_text=override_text)
                 finally:
                     # 清理临时文件
