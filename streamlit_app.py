@@ -88,21 +88,12 @@ def fast_transcribe_audio(audio_path: str) -> Optional[str]:
 
 
 def try_init_ark_sdk() -> None:
-    """尝试初始化 Ark SDK，在启动时检查可用性并记录状态。"""
+    """根据 REST 方案检查 Ark 可用性：只要存在 ARK_API_KEY 即视为可用。"""
     if st.session_state.get('ark_initialized'):
         return
-    try:
-        from volcenginesdkarkruntime import Ark  # type: ignore
-        api_key = os.environ.get("ARK_API_KEY")
-        if not api_key:
-            st.session_state['ark_available'] = False
-        else:
-            _ = Ark(api_key=api_key, timeout=30)
-            st.session_state['ark_available'] = True
-    except Exception:
-        st.session_state['ark_available'] = False
-    finally:
-        st.session_state['ark_initialized'] = True
+    api_key = os.environ.get("ARK_API_KEY")
+    st.session_state['ark_available'] = bool(api_key)
+    st.session_state['ark_initialized'] = True
 
 
 def run_batch_auto_test(excel_path: str) -> Dict[str, Any]:
