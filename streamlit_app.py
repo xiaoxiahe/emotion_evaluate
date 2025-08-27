@@ -7,6 +7,11 @@ from typing import Dict, Any, Optional
 
 import pandas as pd
 import streamlit as st
+import base64
+import requests
+import sqlite3
+import shutil
+import uuid
 try:
     from streamlit_mic_recorder import mic_recorder  # optional mic widget
 except Exception:
@@ -170,6 +175,184 @@ def save_uploaded_file(uploaded_file, suffix: Optional[str] = None) -> Optional[
         return tmp.name
 
 
+def _file_to_base64(path: Optional[str], default_mime: str) -> Optional[Dict[str, str]]:
+    if not path or not os.path.exists(path):
+        return None
+    try:
+        _, ext = os.path.splitext(path)
+        ext = (ext or "").lower()
+        mime = default_mime
+        if default_mime.startswith("image/"):
+            if ext in [".png"]:
+                mime = "image/png"
+            elif ext in [".jpg", ".jpeg"]:
+                mime = "image/jpeg"
+        elif default_mime.startswith("audio/"):
+            if ext in [".mp3"]:
+                mime = "audio/mpeg"
+            elif ext in [".m4a"]:
+                mime = "audio/mp4"
+            elif ext in [".flac"]:
+                mime = "audio/flac"
+            elif ext in [".wav"]:
+                mime = "audio/wav"
+        with open(path, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode("utf-8")
+        return {"mime": mime, "data": b64}
+    except Exception:
+        return None
+
+
+def upload_data_log(payload: Dict[str, Any]) -> None:
+    """根据环境变量 LOG_TARGETS 写入多种落盘目标。
+    支持：
+      - http: 使用 DATA_LOG_ENDPOINT POST
+      - file: 写入 logs.ndjson，并将媒体复制到 logs_media/
+      - sqlite: 写入 logs.db，并将媒体复制到 logs_media/
+    默认：file,sqlite
+    """
+    targets = (os.environ.get("LOG_TARGETS") or "file,sqlite").split(",")
+    targets = [t.strip().lower() for t in targets if t.strip()]
+
+    # 复制媒体到本地目录，返回新路径，便于 file/sqlite 存储
+    def _save_media_to_dir(tmp_path: Optional[str]) -> Optional[str]:
+        if not tmp_path or not os.path.exists(tmp_path):
+            return None
+        try:
+            os.makedirs("logs_media", exist_ok=True)
+            _, ext = os.path.splitext(tmp_path)
+            filename = f"{int(time.time())}_{uuid.uuid4().hex}{ext or ''}"
+            dst = os.path.join("logs_media", filename)
+            shutil.copyfile(tmp_path, dst)
+            return dst
+        except Exception:
+            return None
+
+    image_path = payload.get("__tmp_image_path")
+    audio_path = payload.get("__tmp_audio_path")
+    saved_image = _save_media_to_dir(image_path)
+    saved_audio = _save_media_to_dir(audio_path)
+
+    # 构建简化记录（媒体改为本地路径）
+    record = dict(payload)
+    record.pop("media", None)
+    record.pop("__tmp_image_path", None)
+    record.pop("__tmp_audio_path", None)
+    record["media_paths"] = {"image": saved_image, "audio": saved_audio}
+
+    if "http" in targets:
+        endpoint = os.environ.get("DATA_LOG_ENDPOINT")
+        if endpoint:
+            for _ in range(2):
+                try:
+                    resp = requests.post(endpoint, json=payload, timeout=20)
+                    if 200 <= resp.status_code < 300:
+                        break
+                except Exception:
+                    time.sleep(0.5)
+
+    if "file" in targets:
+        try:
+            with open("logs.ndjson", "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+    if "sqlite" in targets:
+        try:
+            conn = sqlite3.connect("logs.db")
+            cur = conn.cursor()
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp INTEGER,
+                    user_mood TEXT,
+                    user_note TEXT,
+                    override_text TEXT,
+                    result_json TEXT,
+                    image_path TEXT,
+                    audio_path TEXT
+                )
+                """
+            )
+            cur.execute(
+                "INSERT INTO logs (timestamp, user_mood, user_note, override_text, result_json, image_path, audio_path) VALUES (?,?,?,?,?,?,?)",
+                (
+                    record.get("timestamp"),
+                    record.get("user_mood"),
+                    record.get("user_note"),
+                    record.get("override_text"),
+                    json.dumps(record.get("result"), ensure_ascii=False),
+                    record["media_paths"].get("image"),
+                    record["media_paths"].get("audio"),
+                ),
+            )
+            conn.commit()
+            conn.close()
+        except Exception:
+            pass
+
+
+def _load_logs_from_sqlite(limit: int = 200, user_mood: Optional[str] = None, fused_pred: Optional[str] = None):
+    if not os.path.exists("logs.db"):
+        return None
+    try:
+        conn = sqlite3.connect("logs.db")
+        base_sql = "SELECT id, timestamp, user_mood, user_note, override_text, result_json, image_path, audio_path FROM logs"
+        conds = []
+        params = []
+        if user_mood:
+            conds.append("user_mood = ?")
+            params.append(user_mood)
+        if fused_pred:
+            conds.append("json_extract(result_json, '$.fused_pred') = ?")
+            params.append(fused_pred)
+        if conds:
+            base_sql += " WHERE " + " AND ".join(conds)
+        base_sql += " ORDER BY id DESC LIMIT ?"
+        params.append(limit)
+        df = pd.read_sql_query(base_sql, conn, params=params)
+        conn.close()
+        # 展开 result_json
+        if not df.empty:
+            res = df["result_json"].apply(lambda x: json.loads(x) if isinstance(x, str) and x else {})
+            res_df = pd.json_normalize(res)
+            df = pd.concat([df.drop(columns=["result_json"]), res_df], axis=1)
+        return df
+    except Exception:
+        return None
+
+
+def _load_logs_from_ndjson(limit: int = 200, user_mood: Optional[str] = None, fused_pred: Optional[str] = None):
+    if not os.path.exists("logs.ndjson"):
+        return None
+    rows = []
+    try:
+        with open("logs.ndjson", "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                    rows.append(obj)
+                except Exception:
+                    continue
+        if not rows:
+            return None
+        rows = rows[-limit:][::-1]
+        df = pd.json_normalize(rows)
+        # 过滤
+        if user_mood:
+            df = df[df.get("user_mood").fillna("") == user_mood]
+        if fused_pred:
+            df = df[df.get("result.fused_pred").fillna("") == fused_pred]
+        return df
+    except Exception:
+        return None
+
+
 def run_single_test(image_path: Optional[str], audio_path: Optional[str], override_text: str = "") -> Dict[str, Any]:
     # 1) 视觉（使用详细函数，拿到原因与精确耗时）
     v_pred, v_reason, v_time = "NEUTRAL", "", 0.0
@@ -265,6 +448,12 @@ def main():
         
         # 仅文本模式可在弱网/移动端时跳过视觉模型
         only_text = st.checkbox("仅文本模式（跳过视觉识别）", value=False)
+        # 让用户填写当下心情
+        mood_col1, mood_col2 = st.columns([1,1])
+        with mood_col1:
+            user_mood = st.selectbox("当下心情（自报）", ["", "ANGRY", "HAPPY", "SAD", "NEUTRAL"], index=0, help="可选")
+        with mood_col2:
+            user_note = st.text_input("备注（可选）", placeholder="补充说明…")
 
         col_left, col_right = st.columns([1,1])
         with col_left:
@@ -320,6 +509,29 @@ def main():
                     # 若勾选仅文本模式，则不传图片路径
                     img_arg = None if only_text else tmp_img
                     res = run_single_test(img_arg, tmp_wav, override_text=override_text)
+                    # 收集并上传日志（图片、文本、音频、实际心情、预测结果、耗时）
+                    try:
+                        payload = {
+                            "timestamp": int(time.time()),
+                            "user_mood": user_mood or None,
+                            "user_note": user_note or None,
+                            "override_text": override_text or None,
+                            "result": {
+                                "vision_pred": res.get("vision_pred"),
+                                "text_pred": res.get("text_pred"),
+                                "fused_pred": res.get("fused_pred"),
+                                "vision_time_s": res.get("vision_time_s"),
+                                "text_time_s": res.get("text_time_s"),
+                                "asr_time_s": res.get("asr_time_s"),
+                                "row_time_s": res.get("row_time_s"),
+                            },
+                            # 保留临时路径用于本地落盘（避免重复编码大文件）
+                            "__tmp_image_path": tmp_img,
+                            "__tmp_audio_path": tmp_wav,
+                        }
+                        upload_data_log(payload)
+                    except Exception:
+                        pass
                 finally:
                     # 清理临时文件
                     if tmp_img and os.path.exists(tmp_img):
@@ -365,6 +577,7 @@ def main():
             else:
                 st.info("无转写文本")
 
+    
 
 if __name__ == "__main__":
     main()
