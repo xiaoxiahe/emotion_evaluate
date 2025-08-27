@@ -148,9 +148,16 @@ def run_batch_auto_test(excel_path: str) -> Dict[str, Any]:
     }
 
 
-def save_uploaded_file(uploaded_file, suffix: str) -> Optional[str]:
+def save_uploaded_file(uploaded_file, suffix: Optional[str] = None) -> Optional[str]:
     if uploaded_file is None:
         return None
+    # 依据原文件名保留扩展名，除非显式传入 suffix
+    if suffix is None:
+        try:
+            _, ext = os.path.splitext(getattr(uploaded_file, "name", ""))
+            suffix = ext if ext else ""
+        except Exception:
+            suffix = ""
     with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
         tmp.write(uploaded_file.read())
         return tmp.name
@@ -204,6 +211,18 @@ def main():
         st.session_state['fast_stt_model'] = fast_stt_model
     
     st.success("🚀 系统初始化完成！")
+
+    # 侧边栏提供可动态配置 ARK_API_KEY 的入口，便于移动端/本地环境设置
+    with st.sidebar:
+        st.subheader("设置")
+        current_key_masked = "已设置" if os.environ.get("ARK_API_KEY") else "未设置"
+        st.caption(f"大模型 API Key: {current_key_masked}")
+        with st.expander("配置 Ark API Key", expanded=False):
+            new_key = st.text_input("ARK_API_KEY", type="password", placeholder="输入并点击保存")
+            if st.button("保存 Key") and new_key:
+                os.environ["ARK_API_KEY"] = new_key.strip()
+                st.session_state['ark_available'] = True
+                st.success("已保存 API Key")
 
     tab1, tab2 = st.tabs(["自动测试", "单条测试（上传图片与音频）"]) 
 
@@ -283,12 +302,14 @@ def main():
             run_single_btn = st.button("🚀 开始单条测试", type="primary")
         if run_single_btn:
             with st.spinner("处理中..."):
-                tmp_img = save_uploaded_file(img_file, suffix=".png") if img_file else None
+                # 保留上传图片原始扩展名
+                tmp_img = save_uploaded_file(img_file) if img_file else None
                 # 录音优先，其次是上传文件
                 if rec_tmp_path:
                     tmp_wav = rec_tmp_path
                 else:
-                    tmp_wav = save_uploaded_file(wav_file, suffix=".wav") if wav_file else None
+                    # 保留上传音频原始扩展名，避免仅限 .wav
+                    tmp_wav = save_uploaded_file(wav_file) if wav_file else None
 
                 try:
                     res = run_single_test(tmp_img, tmp_wav, override_text=override_text)
