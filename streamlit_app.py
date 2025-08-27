@@ -8,6 +8,9 @@ from typing import Dict, Any, Optional
 import pandas as pd
 import streamlit as st
 
+# 必须在任何 Streamlit 调用前设置页面配置，避免 Cloud 上布局/滚动异常
+st.set_page_config(page_title="多模态情绪识别演示", layout="wide")
+
 # 复用已有逻辑
 from p2p_evaluate import (
     EXCEL_PATH as DEFAULT_EXCEL_PATH,
@@ -171,7 +174,6 @@ def run_single_test(image_path: Optional[str], audio_path: Optional[str], overri
 
 
 def main():
-    st.set_page_config(page_title="多模态情绪识别演示", layout="wide")
     st.title("多模态情绪识别演示")
     
     # 在界面启动时预加载语音转文本模型
