@@ -11,6 +11,13 @@ import streamlit as st
 # 必须在任何 Streamlit 调用前设置页面配置，避免 Cloud 上布局/滚动异常
 st.set_page_config(page_title="多模态情绪识别演示", layout="wide")
 
+# 将 Cloud Secrets 注入到环境变量，供 REST 客户端读取
+try:
+    if "ARK_API_KEY" in st.secrets:
+        os.environ["ARK_API_KEY"] = st.secrets["ARK_API_KEY"]
+except Exception:
+    pass
+
 # 复用已有逻辑
 from p2p_evaluate import (
     EXCEL_PATH as DEFAULT_EXCEL_PATH,

@@ -68,62 +68,27 @@ def predict_visual(image_path: str) -> str:
 
 
 def predict_visual_detail(image_path: str) -> Tuple[str, str, float]:
-    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。
-    若 Ark SDK 不可用，直接返回安全的默认值以保证在 Cloud 正常运行。
-    """
+    """使用 REST API 进行视觉情绪识别，返回 (label, reason, duration_s)。失败返回默认值。"""
+    from utils_ark_rest import ark_chat_json, image_to_data_url
+    prompt = (
+        "你是一个专业的人类情绪判断专家。仅输出严格JSON：{\"result\": string, \"reason\": string}。\n"
+        "从 [ANGRY, HAPPY, SAD, NEUTRAL] 中选择；无法判断一律 NEUTRAL。"
+    )
     try:
-        import base64
-        try:
-            from volcenginesdkarkruntime import Ark  # type: ignore
-        except Exception:
-            return "NEUTRAL", "Ark SDK 不可用，使用默认结果", 0.0
-
-        # 与 emotion_based_visual 中一致的配置
-        model_name = 'doubao_1_6_flash'
-        model_endpoint = 'doubao-seed-1-6-flash-250715'
-
-        # 读取图片并编码
-        with open(image_path, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode("utf-8")
-
-        # 创建客户端（这里直接从环境变量读取 key，避免硬编码）
-        api_key = os.environ.get("ARK_API_KEY") or "be62df6f-1828-47a4-84f1-2932c111bc64"
-        client = Ark(api_key=api_key, base_url="https://ark.cn-beijing.volces.com/api/v3", timeout=1800)
-
-        prompt = """你是一个专业的人类情绪判断专家。请严格按以下规则判断此刻用户表情中传达的情感：
-## 要求
-1. 根据上传的图片，判断用户此刻的情绪，图片可能模糊，请你尽可能地分析用户表情中表达的情感；
-2. 输出必须为严格JSON格式，且仅包含：{"result": string, "reason": string}
-## 判断标准
-1. 从 [ANGRY, HAPPY, SAD, NEUTRAL] 中选择；
-2. 无法判断一律 NEUTRAL；
-## 注意
-仅输出 JSON，不要额外解释。"""
-
         t0 = time.time()
-        response = client.chat.completions.create(
-            model=model_endpoint,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}},
-                    ],
-                }
-            ],
-            temperature=0.1,
-            top_p=0.7,
-            max_tokens=4096,
-            thinking={"type": "disabled"},
+        resp = ark_chat_json(
+            model="doubao-seed-1-6-flash-250715",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_to_data_url(image_path)}},
+                ],
+            }],
         )
         duration = time.time() - t0
-
-        content = response.choices[0].message.content
-        try:
-            obj = json.loads(content)
-        except Exception:
-            obj = {"result": "NEUTRAL", "reason": ""}
+        content = resp["choices"][0]["message"].get("content")
+        obj = json.loads(content) if isinstance(content, str) else (content if isinstance(content, dict) else {"result": "NEUTRAL"})
         label = normalize_label(obj.get("result", "NEUTRAL"))
         reason = str(obj.get("reason", "") or "")
         return label, reason, duration
@@ -192,72 +157,9 @@ def transcribe_audio_to_text(audio_path: str) -> Optional[str]:
 
 
 def predict_text(text: str) -> str:
-    # 复用 emotion_based_text 的客户端与提示，拿到 emotion 字段
-    # 为降低耗时，这里使用模块级复用的 Ark 客户端
+    from utils_ark_rest import ark_chat_json
     try:
-        from volcenginesdkarkruntime import Ark  # type: ignore
-    except Exception:
-        # 安全回退：无法访问 Ark 时，返回 NEUTRAL
-        return "NEUTRAL"
-    import os as _os
-
-    global _ARK_CLIENT
-    try:
-        _ARK_CLIENT
-    except NameError:
-        _ARK_CLIENT = None
-
-    if _ARK_CLIENT is None:
-        api_key = _os.environ.get("ARK_API_KEY") or "be62df6f-1828-47a4-84f1-2932c111bc64"
-        _ARK_CLIENT = Ark(api_key=api_key, timeout=1800)
-    client = _ARK_CLIENT
-    try:
-        response = client.chat.completions.create(
-            model="doubao-seed-1.6-250615",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "你是一个严格的文本情感分类器。必须仅输出严格 JSON：{\"emotion\": string, \"reason\": string}；emotion ∈ [NEUTRAL,SAD,ANGRY,HAPPY]；不确定判 NEUTRAL。"
-                },
-                {"role": "user", "content": f"待分类文本：「{text}」"}
-            ],
-            thinking={"type": "disabled"},
-            response_format={"type": "json_object"}
-        )
-        msg = response.choices[0].message
-        try:
-            obj = getattr(msg, "parsed", None) or json.loads(getattr(msg, "content", msg))
-        except Exception:
-            obj = {"emotion": "NEUTRAL"}
-        emotion_field = obj.get("emotion") if "emotion" in obj else obj.get("result", "NEUTRAL")
-        return normalize_label(emotion_field)
-    except Exception:
-        return "NEUTRAL"
-
-
-def predict_text_detail(text: str) -> Tuple[str, str, float]:
-    """返回 (label, reason, duration_s)。失败时返回 (NEUTRAL, '', 0.0)。
-    若 Ark SDK 不可用，直接返回安全的默认值以保证在 Cloud 正常运行。
-    """
-    try:
-        from volcenginesdkarkruntime import Ark  # type: ignore
-    except Exception:
-        return "NEUTRAL", "Ark SDK 不可用，使用默认结果", 0.0
-    import os as _os
-
-    global _ARK_CLIENT
-    try:
-        _ARK_CLIENT
-    except NameError:
-        _ARK_CLIENT = None
-
-    if _ARK_CLIENT is None:
-        api_key = _os.environ.get("ARK_API_KEY") or "be62df6f-1828-47a4-84f1-2932c111bc64"
-        _ARK_CLIENT = Ark(api_key=api_key, timeout=1800)
-    client = _ARK_CLIENT
-    try:
-        t0 = time.time()
-        response = client.chat.completions.create(
+        resp = ark_chat_json(
             model="doubao-seed-1.6-250615",
             messages=[
                 {
@@ -266,15 +168,35 @@ def predict_text_detail(text: str) -> Tuple[str, str, float]:
                 },
                 {"role": "user", "content": f"待分类文本：「{text}」"},
             ],
-            thinking={"type": "disabled"},
-            response_format={"type": "json_object"},
+        )
+        msg = resp["choices"][0]["message"]
+        content = msg.get("content", "{}")
+        obj = msg.get("parsed") or (json.loads(content) if isinstance(content, str) else content)
+        emotion_field = obj.get("emotion") if "emotion" in obj else obj.get("result", "NEUTRAL")
+        return normalize_label(emotion_field)
+    except Exception:
+        return "NEUTRAL"
+
+
+def predict_text_detail(text: str) -> Tuple[str, str, float]:
+    from utils_ark_rest import ark_chat_json
+    import json as _json
+    t0 = time.time()
+    try:
+        resp = ark_chat_json(
+            model="doubao-seed-1.6-250615",
+            messages=[
+                {
+                    "role": "system",
+                    "content": "你是一个严格的文本情感分类器。必须仅输出严格 JSON：{\"emotion\": string, \"reason\": string}；emotion ∈ [NEUTRAL,SAD,ANGRY,HAPPY]；不确定判 NEUTRAL。",
+                },
+                {"role": "user", "content": f"待分类文本：「{text}」"},
+            ],
         )
         duration = time.time() - t0
-        msg = response.choices[0].message
-        try:
-            obj = getattr(msg, "parsed", None) or json.loads(getattr(msg, "content", msg))
-        except Exception:
-            obj = {"emotion": "NEUTRAL", "reason": ""}
+        msg = resp["choices"][0]["message"]
+        content = msg.get("content", "{}")
+        obj = msg.get("parsed") or (_json.loads(content) if isinstance(content, str) else content)
         emotion_field = obj.get("emotion") if "emotion" in obj else obj.get("result", "NEUTRAL")
         label = normalize_label(emotion_field)
         reason = str(obj.get("reason", "") or "")
