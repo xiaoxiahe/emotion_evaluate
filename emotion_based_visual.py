@@ -5,7 +5,10 @@ import threading
 import time
 import os
 from concurrent.futures import ThreadPoolExecutor
-from volcenginesdkarkruntime import Ark
+try:
+    from volcenginesdkarkruntime import Ark  # type: ignore
+except Exception:
+    Ark = None
 
 model_key_dict = {
     'doubao_1_6':'be62df6f-1828-47a4-84f1-2932c111bc64',
@@ -20,11 +23,9 @@ model_endpoint_dict = {
 
 # logging.basicConfig(level=logging.INFO)
 def create_client(model_name):
-    return Ark(
-        api_key=model_key_dict[model_name],
-        base_url="https://ark.cn-beijing.volces.com/api/v3",
-        timeout=1800,
-    )
+    if Ark is None:
+        raise RuntimeError("volcenginesdkarkruntime 未安装，无法创建 Ark 客户端")
+    return Ark(api_key=model_key_dict[model_name], base_url="https://ark.cn-beijing.volces.com/api/v3", timeout=1800)
 
 def encode_image(image_path):
     with open(image_path, "rb") as image_file:

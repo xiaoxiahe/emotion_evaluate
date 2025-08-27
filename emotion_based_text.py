@@ -1,7 +1,10 @@
 import pandas as pd
 import os
 import time
-from volcenginesdkarkruntime import Ark
+try:
+    from volcenginesdkarkruntime import Ark  # type: ignore
+except Exception:
+    Ark = None  # 在云端或未安装时允许脚本被安全导入
 import json
 import numpy as np
 from sklearn.metrics import accuracy_score, recall_score
@@ -9,11 +12,10 @@ from sklearn.metrics import accuracy_score, recall_score
 # 设置豆包API Key
 os.environ["ARK_API_KEY"] = "be62df6f-1828-47a4-84f1-2932c111bc64"
 
-# 初始化豆包客户端
-client = Ark(
-    api_key=os.environ.get("ARK_API_KEY"),
-    timeout=1800,
-)
+# 初始化豆包客户端（若 Ark SDK 不可用则友好退出）
+if Ark is None:
+    raise SystemExit("volcenginesdkarkruntime 未安装，跳过 emotion_based_text 脚本运行")
+client = Ark(api_key=os.environ.get("ARK_API_KEY"), timeout=1800)
 
 # 标签映射
 label_map = {
