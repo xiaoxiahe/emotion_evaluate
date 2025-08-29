@@ -203,7 +203,7 @@ def _file_to_base64(path: Optional[str], default_mime: str) -> Optional[Dict[str
         return None
 
 
-def upload_data_log(payload: Dict[str, Any]) -> None:
+def upload_data_log(payload: Dict[str, Any]) -> Dict[str, Any]:
     """根据环境变量 LOG_TARGETS 写入多种落盘目标。
     支持：
       - http: 使用 DATA_LOG_ENDPOINT POST
@@ -213,6 +213,7 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
     """
     targets = (os.environ.get("LOG_TARGETS") or "file,sqlite").split(",")
     targets = [t.strip().lower() for t in targets if t.strip()]
+    results = {t: False for t in targets}
 
     # 复制媒体到本地目录，返回新路径，便于 file/sqlite 存储
     def _save_media_to_dir(tmp_path: Optional[str]) -> Optional[str]:
@@ -232,6 +233,9 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
     audio_path = payload.get("__tmp_audio_path")
     saved_image = _save_media_to_dir(image_path)
     saved_audio = _save_media_to_dir(audio_path)
+    # 若复制失败，回退为内联 base64，确保数据不丢失
+    image_b64 = None if saved_image else _file_to_base64(image_path, "image/jpeg")
+    audio_b64 = None if saved_audio else _file_to_base64(audio_path, "audio/wav")
 
     # 构建简化记录（媒体改为本地路径）
     record = dict(payload)
@@ -239,6 +243,8 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
     record.pop("__tmp_image_path", None)
     record.pop("__tmp_audio_path", None)
     record["media_paths"] = {"image": saved_image, "audio": saved_audio}
+    if image_b64 or audio_b64:
+        record["media_b64"] = {"image": image_b64, "audio": audio_b64}
 
     if "http" in targets:
         endpoint = os.environ.get("DATA_LOG_ENDPOINT")
@@ -247,16 +253,29 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
                 try:
                     resp = requests.post(endpoint, json=payload, timeout=20)
                     if 200 <= resp.status_code < 300:
+                        results["http"] = True
                         break
                 except Exception:
                     time.sleep(0.5)
+        else:
+            results["http"] = False
 
     if "file" in targets:
         try:
+            # 确保文件存在
+            if not os.path.exists("logs.ndjson"):
+                with open("logs.ndjson", "a", encoding="utf-8") as _:
+                    pass
             with open("logs.ndjson", "a", encoding="utf-8") as f:
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                try:
+                    f.flush()
+                    os.fsync(f.fileno())
+                except Exception:
+                    pass
+            results["file"] = True
         except Exception:
-            pass
+            results["file"] = False
 
     if "sqlite" in targets:
         try:
@@ -290,8 +309,13 @@ def upload_data_log(payload: Dict[str, Any]) -> None:
             )
             conn.commit()
             conn.close()
+            results["sqlite"] = True
         except Exception:
-            pass
+            results["sqlite"] = False
+
+    # 如果没有指定任何目标，视为失败
+    overall = bool(targets) and all(results.get(t, False) for t in targets)
+    return {"ok": overall, "results": results, "record": record}
 
 
 def init_local_logging_storage() -> None:
@@ -437,7 +461,7 @@ def main():
 
     # 移除 UI 内部设置 ARK_API_KEY 的入口，统一使用环境变量/Secrets
 
-    tab1, tab2 = st.tabs(["自动测试", "单条测试（上传图片与音频）"]) 
+    tab1, tab2, tab3 = st.tabs(["自动测试", "单条测试（上传图片与音频）", "历史记录"]) 
 
     with tab1:
         st.subheader("自动测试（批量评估）")
@@ -603,7 +627,12 @@ def main():
                         "__tmp_image_path": st.session_state.get('last_tmp_image'),
                         "__tmp_audio_path": st.session_state.get('last_tmp_audio'),
                     }
-                    upload_data_log(payload)
+                    result_info = upload_data_log(payload)
+                    # 根据结果判断是否全部目标成功
+                    if not result_info.get("ok"):
+                        st.warning(f"部分写入失败: {result_info.get('results')}")
+                    else:
+                        st.success("已保存")
                     # 保存后清理临时文件并清空会话状态
                     for k in ['last_tmp_image', 'last_tmp_audio']:
                         p = st.session_state.get(k)
@@ -615,11 +644,56 @@ def main():
                     for k in ['last_result','last_tmp_image','last_tmp_audio','last_override_text','user_mood_select','user_note_input']:
                         if k in st.session_state:
                             del st.session_state[k]
-                    st.success("已保存")
                 except Exception as e:
                     st.warning(f"保存失败：{e}")
 
-    
+    with tab3:
+        st.subheader("历史记录（数据库/文件）")
+        src_col1, src_col2, src_col3 = st.columns([1,1,2])
+        with src_col1:
+            source = st.radio("数据来源", ["sqlite", "ndjson"], horizontal=True)
+        with src_col2:
+            limit = st.number_input("读取条数", min_value=10, max_value=1000, value=200, step=10)
+        with src_col3:
+            refresh = st.button("刷新", type="secondary")
+
+        f1, f2 = st.columns([1,1])
+        with f1:
+            mood_filter = st.selectbox("按自报心情过滤", ["", "ANGRY", "HAPPY", "SAD", "NEUTRAL"], index=0)
+        with f2:
+            fused_filter = st.selectbox("按融合结果过滤", ["", "ANGRY", "HAPPY", "SAD", "NEUTRAL"], index=0)
+
+        if refresh or True:
+            if source == "sqlite":
+                df = _load_logs_from_sqlite(limit=int(limit), 
+                                            user_mood=(mood_filter or None), 
+                                            fused_pred=(fused_filter or None))
+            else:
+                df = _load_logs_from_ndjson(limit=int(limit), 
+                                            user_mood=(mood_filter or None), 
+                                            fused_pred=(fused_filter or None))
+
+            if df is None or df.empty:
+                st.info("当前无数据或未匹配到记录。")
+            else:
+                st.dataframe(df, use_container_width=True, height=360)
+                csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button("下载当前结果 CSV", data=csv_bytes, file_name="history_records.csv", mime="text/csv")
+                # 显示最近一条的媒体示例（若存在路径）
+                try:
+                    last = df.iloc[0]
+                    media_cols = st.columns([1,1])
+                    with media_cols[0]:
+                        imgp = last.get("image_path") if "image_path" in df.columns else None
+                        if isinstance(imgp, str) and os.path.exists(imgp):
+                            st.image(imgp, caption="最近图片")
+                    with media_cols[1]:
+                        audiop = last.get("audio_path") if "audio_path" in df.columns else None
+                        if isinstance(audiop, str) and os.path.exists(audiop):
+                            with open(audiop, "rb") as f:
+                                st.audio(f.read())
+                except Exception:
+                    pass
 
 if __name__ == "__main__":
     main()
