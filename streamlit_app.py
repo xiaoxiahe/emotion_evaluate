@@ -800,8 +800,8 @@ def main():
                                     file_name=f"emotion_audio_{last.get('id', 'unknown')}{audio_ext}",
                                     mime=f"audio/{audio_ext[1:]}"
                                 )
-                                 except Exception as e:
-                     st.warning(f"显示媒体示例失败: {e}")
+                except Exception as e:
+                    st.warning(f"显示媒体示例失败: {e}")
                 
                 # 媒体文件管理页面
                 st.markdown("### 🗂️ 媒体文件管理")
