@@ -4,6 +4,7 @@ import time
 import json
 import tempfile
 from typing import Dict, Any, Optional
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
@@ -679,6 +680,94 @@ def main():
                 st.dataframe(df, use_container_width=True, height=360)
                 csv_bytes = df.to_csv(index=False).encode("utf-8-sig")
                 st.download_button("下载当前结果 CSV", data=csv_bytes, file_name="history_records.csv", mime="text/csv")
+                
+                # 媒体文件下载功能
+                st.markdown("### 📁 媒体文件下载")
+                
+                # 统计可下载的媒体文件
+                image_files = []
+                audio_files = []
+                for _, row in df.iterrows():
+                    img_path = row.get("image_path")
+                    audio_path = row.get("audio_path")
+                    
+                    if isinstance(img_path, str) and os.path.exists(img_path):
+                        image_files.append({
+                            'path': img_path,
+                            'id': row.get('id', 'unknown'),
+                            'timestamp': row.get('timestamp', 0),
+                            'mood': row.get('user_mood', 'unknown')
+                        })
+                    
+                    if isinstance(audio_path, str) and os.path.exists(audio_path):
+                        audio_files.append({
+                            'path': audio_path,
+                            'id': row.get('id', 'unknown'),
+                            'timestamp': row.get('timestamp', 0),
+                            'mood': row.get('user_mood', 'unknown')
+                        })
+                
+                # 显示媒体文件统计
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.info(f"📷 可下载图片: {len(image_files)} 个")
+                with col2:
+                    st.info(f"🎵 可下载音频: {len(audio_files)} 个")
+                
+                # 批量下载选项
+                if image_files or audio_files:
+                    download_col1, download_col2 = st.columns(2)
+                    
+                    with download_col1:
+                        if image_files:
+                            # 创建图片压缩包
+                            import zipfile
+                            import io
+                            
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                for img_info in image_files:
+                                    try:
+                                        # 生成文件名：ID_心情_时间戳.扩展名
+                                        ext = os.path.splitext(img_info['path'])[1]
+                                        filename = f"{img_info['id']}_{img_info['mood']}_{img_info['timestamp']}{ext}"
+                                        zip_file.write(img_info['path'], filename)
+                                    except Exception as e:
+                                        st.warning(f"添加图片到压缩包失败: {e}")
+                            
+                            zip_buffer.seek(0)
+                            st.download_button(
+                                "📦 下载所有图片 (ZIP)",
+                                data=zip_buffer.getvalue(),
+                                file_name="emotion_images.zip",
+                                mime="application/zip"
+                            )
+                        else:
+                            st.info("暂无图片可下载")
+                    
+                    with download_col2:
+                        if audio_files:
+                            # 创建音频压缩包
+                            zip_buffer = io.BytesIO()
+                            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                for audio_info in audio_files:
+                                    try:
+                                        ext = os.path.splitext(audio_info['path'])[1]
+                                        filename = f"{audio_info['id']}_{audio_info['mood']}_{audio_info['timestamp']}{ext}"
+                                        zip_file.write(audio_info['path'], filename)
+                                    except Exception as e:
+                                        st.warning(f"添加音频到压缩包失败: {e}")
+                            
+                            zip_buffer.seek(0)
+                            st.download_button(
+                                "📦 下载所有音频 (ZIP)",
+                                data=zip_buffer.getvalue(),
+                                file_name="emotion_audios.zip",
+                                mime="application/zip"
+                            )
+                        else:
+                            st.info("暂无音频可下载")
+                
                 # 显示最近一条的媒体示例（若存在路径）
                 try:
                     last = df.iloc[0]
@@ -687,13 +776,141 @@ def main():
                         imgp = last.get("image_path") if "image_path" in df.columns else None
                         if isinstance(imgp, str) and os.path.exists(imgp):
                             st.image(imgp, caption="最近图片")
+                            # 添加单张图片下载
+                            with open(imgp, "rb") as f:
+                                img_data = f.read()
+                                img_ext = os.path.splitext(imgp)[1]
+                                st.download_button(
+                                    "📥 下载此图片",
+                                    data=img_data,
+                                    file_name=f"emotion_image_{last.get('id', 'unknown')}{img_ext}",
+                                    mime=f"image/{img_ext[1:]}"
+                                )
                     with media_cols[1]:
                         audiop = last.get("audio_path") if "audio_path" in df.columns else None
                         if isinstance(audiop, str) and os.path.exists(audiop):
                             with open(audiop, "rb") as f:
-                                st.audio(f.read())
-                except Exception:
-                    pass
+                                audio_data = f.read()
+                                st.audio(audio_data)
+                                # 添加单个音频下载
+                                audio_ext = os.path.splitext(audiop)[1]
+                                st.download_button(
+                                    "📥 下载此音频",
+                                    data=audio_data,
+                                    file_name=f"emotion_audio_{last.get('id', 'unknown')}{audio_ext}",
+                                    mime=f"audio/{audio_ext[1:]}"
+                                )
+                                 except Exception as e:
+                     st.warning(f"显示媒体示例失败: {e}")
+                
+                # 媒体文件管理页面
+                st.markdown("### 🗂️ 媒体文件管理")
+                
+                # 显示所有媒体文件的详细信息
+                if image_files or audio_files:
+                    # 创建媒体文件列表
+                    media_df_data = []
+                    
+                    for img_info in image_files:
+                        media_df_data.append({
+                            '类型': '图片',
+                            'ID': img_info['id'],
+                            '心情': img_info['mood'],
+                            '时间': datetime.fromtimestamp(img_info['timestamp']).strftime('%Y-%m-%d %H:%M:%S') if img_info['timestamp'] else 'Unknown',
+                            '文件名': os.path.basename(img_info['path']),
+                            '路径': img_info['path'],
+                            '大小(KB)': round(os.path.getsize(img_info['path']) / 1024, 2)
+                        })
+                    
+                    for audio_info in audio_files:
+                        media_df_data.append({
+                            '类型': '音频',
+                            'ID': audio_info['id'],
+                            '心情': audio_info['mood'],
+                            '时间': datetime.fromtimestamp(audio_info['timestamp']).strftime('%Y-%m-%d %H:%M:%S') if audio_info['timestamp'] else 'Unknown',
+                            '文件名': os.path.basename(audio_info['path']),
+                            '路径': audio_info['path'],
+                            '大小(KB)': round(os.path.getsize(audio_info['path']) / 1024, 2)
+                        })
+                    
+                    if media_df_data:
+                        media_df = pd.DataFrame(media_df_data)
+                        st.dataframe(media_df, use_container_width=True, height=300)
+                        
+                        # 按类型筛选下载
+                        st.markdown("#### 📥 分类下载")
+                        type_col1, type_col2 = st.columns(2)
+                        
+                        with type_col1:
+                            if image_files:
+                                # 只下载图片
+                                zip_buffer = io.BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                    for img_info in image_files:
+                                        try:
+                                            ext = os.path.splitext(img_info['path'])[1]
+                                            filename = f"图片_{img_info['id']}_{img_info['mood']}_{img_info['timestamp']}{ext}"
+                                            zip_file.write(img_info['path'], filename)
+                                        except Exception as e:
+                                            st.warning(f"添加图片到压缩包失败: {e}")
+                                
+                                zip_buffer.seek(0)
+                                st.download_button(
+                                    "📷 下载所有图片",
+                                    data=zip_buffer.getvalue(),
+                                    file_name="emotion_images_only.zip",
+                                    mime="application/zip"
+                                )
+                        
+                        with type_col2:
+                            if audio_files:
+                                # 只下载音频
+                                zip_buffer = io.BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                    for audio_info in audio_files:
+                                        try:
+                                            ext = os.path.splitext(audio_info['path'])[1]
+                                            filename = f"音频_{audio_info['id']}_{audio_info['mood']}_{audio_info['timestamp']}{ext}"
+                                            zip_file.write(audio_info['path'], filename)
+                                        except Exception as e:
+                                            st.warning(f"添加音频到压缩包失败: {e}")
+                                
+                                zip_buffer.seek(0)
+                                st.download_button(
+                                    "🎵 下载所有音频",
+                                    data=zip_buffer.getvalue(),
+                                    file_name="emotion_audios_only.zip",
+                                    mime="application/zip"
+                                )
+                        
+                        # 按心情筛选下载
+                        st.markdown("#### 😊 按心情下载")
+                        mood_options = list(set([item['mood'] for item in image_files + audio_files if item['mood'] != 'unknown']))
+                        if mood_options:
+                            selected_mood = st.selectbox("选择心情进行下载", mood_options)
+                            
+                            mood_files = [item for item in image_files + audio_files if item['mood'] == selected_mood]
+                            if mood_files:
+                                zip_buffer = io.BytesIO()
+                                with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                                    for file_info in mood_files:
+                                        try:
+                                            ext = os.path.splitext(file_info['path'])[1]
+                                            file_type = "图片" if file_info in image_files else "音频"
+                                            filename = f"{file_type}_{file_info['id']}_{file_info['mood']}_{file_info['timestamp']}{ext}"
+                                            zip_file.write(file_info['path'], filename)
+                                        except Exception as e:
+                                            st.warning(f"添加文件到压缩包失败: {e}")
+                                
+                                zip_buffer.seek(0)
+                                st.download_button(
+                                    f"📦 下载 {selected_mood} 心情的所有文件",
+                                    data=zip_buffer.getvalue(),
+                                    file_name=f"emotion_{selected_mood.lower()}_files.zip",
+                                    mime="application/zip"
+                                )
+                else:
+                    st.info("暂无媒体文件可管理")
 
 if __name__ == "__main__":
     main()
