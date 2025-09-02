@@ -45,8 +45,24 @@ from p2p_evaluate import (
 def load_streaming_asr_model():
     """预加载火山引擎WebSocket语音转文本模型"""
     try:
-        from streaming_asr_demo import AsrWsClient, execute_one
-        # st.success("✅ 火山引擎WebSocket语音转文本模型加载成功")
+        # 添加调试信息
+        import sys
+        import os
+        st.info(f"当前工作目录: {os.getcwd()}")
+        st.info(f"Python路径: {sys.path}")
+        
+        # 尝试多种导入方式
+        try:
+            from streaming_asr_demo import AsrWsClient, execute_one
+        except ImportError:
+            # 如果直接导入失败，尝试添加当前目录到Python路径
+            import sys
+            import os
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            if current_dir not in sys.path:
+                sys.path.insert(0, current_dir)
+            from streaming_asr_demo import AsrWsClient, execute_one
+        st.success("✅ 火山引擎WebSocket语音转文本模型加载成功")
         return True
     except Exception as e:
         st.warning(f"⚠️ 火山引擎WebSocket语音转文本模型加载失败: {e}，将使用备用方案")
