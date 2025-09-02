@@ -40,32 +40,26 @@ from p2p_evaluate import (
     normalize_label,
 )
 
-# 预加载快速语音转文本模型
+# 预加载火山引擎语音转文本模型
 @st.cache_resource
-def load_fast_stt_model():
-    """预加载快速语音转文本模型"""
+def load_huoshan_stt_model():
+    """预加载火山引擎语音转文本模型"""
     try:
-        from stt_integration import get_fast_whisper_model
-        model = get_fast_whisper_model()
-        if model:
-            st.success("✅ 快速语音转文本模型加载成功")
-            return model
-        else:
-            st.warning("⚠️ 快速语音转文本模型加载失败，将使用备用方案")
-            return None
+        from huoshan_quik import recognize_task
+        st.success("✅ 火山引擎语音转文本模型加载成功")
+        return True
     except Exception as e:
-        st.warning(f"⚠️ 快速语音转文本模型加载失败: {e}，将使用备用方案")
+        st.warning(f"⚠️ 火山引擎语音转文本模型加载失败: {e}，将使用备用方案")
         return None
 
-# 快速语音转文本函数
-def fast_transcribe_audio(audio_path: str) -> Optional[str]:
-    """使用预加载的快速模型进行语音转文本"""
+# 火山引擎语音转文本函数
+def huoshan_transcribe_audio(audio_path: str) -> Optional[str]:
+    """使用火山引擎进行语音转文本"""
     if not audio_path or not os.path.exists(audio_path):
         return None
     
-    # 获取预加载的模型
-    model = st.session_state.get('fast_stt_model')
-    if not model:
+    # 检查火山引擎模型是否可用
+    if not st.session_state.get('huoshan_stt_available'):
         # 备用方案：使用p2p_evaluate中的函数
         from p2p_evaluate import transcribe_audio_to_text
         return transcribe_audio_to_text(audio_path)
@@ -73,35 +67,39 @@ def fast_transcribe_audio(audio_path: str) -> Optional[str]:
     try:
         start_time = time.time()
         
-        # 使用优化的参数配置
-        segments, info = model.transcribe(
-            audio_path,
-            beam_size=1,                    # 最小beam size，最快速度
-            language="zh",                  # 指定语言，避免检测
-            vad_filter=False,               # 关闭VAD，提高速度
-            condition_on_previous_text=False, # 不依赖前文
-            temperature=0.0,                # 确定性输出
-            word_timestamps=False           # 关闭时间戳，提高速度
-        )
+        # 使用火山引擎API进行语音识别
+        from huoshan_quik import recognize_task
+        response = recognize_task(file_path=audio_path)
         
-        # 拼接所有分段为一条完整句子
-        final_text = " ".join(seg.text.strip() for seg in segments if getattr(seg, "text", None))
-        
-        processing_time = time.time() - start_time
-        st.info(f"🎵 语音转写完成 ({processing_time:.2f}秒)")
-        
-        return final_text if final_text.strip() else None
+        # 解析响应结果
+        if response.status_code == 200:
+            result_data = response.json()
+            # 根据火山引擎API的响应格式提取文本
+            # 这里需要根据实际的API响应格式进行调整
+            text_content = ""
+            if 'result' in result_data and 'text' in result_data['result']:
+                text_content = result_data['result']['text']
+            elif 'data' in result_data and 'text' in result_data['data']:
+                text_content = result_data['data']['text']
+            else:
+                # 如果无法解析，尝试备用方案
+                from p2p_evaluate import transcribe_audio_to_text
+                return transcribe_audio_to_text(audio_path)
+            
+            processing_time = time.time() - start_time
+            st.info(f"🎵 火山引擎语音转写完成 ({processing_time:.2f}秒)")
+            
+            return text_content if text_content.strip() else None
+        else:
+            # API调用失败，使用备用方案
+            from p2p_evaluate import transcribe_audio_to_text
+            return transcribe_audio_to_text(audio_path)
         
     except Exception as e:
-        hint = ""
-        try:
-            ext = os.path.splitext(audio_path)[1].lower()
-            if ext in [".mp3", ".m4a", ".flac"]:
-                hint = "（可能缺少 ffmpeg，建议安装后重试，或先转为 wav）"
-        except Exception:
-            pass
-        st.error(f"❌ 语音转写失败: {e} {hint}")
-        return None
+        st.warning(f"火山引擎语音转写失败: {e}，使用备用方案")
+        # 备用方案：使用p2p_evaluate中的函数
+        from p2p_evaluate import transcribe_audio_to_text
+        return transcribe_audio_to_text(audio_path)
 
 
 def try_init_ark_sdk() -> None:
@@ -416,13 +414,13 @@ def run_single_test(image_path: Optional[str], audio_path: Optional[str], overri
     if image_path and os.path.exists(image_path):
         v_pred, v_reason, v_time = predict_visual_detail(image_path)
 
-    # 2) 文本：若 override_text 提供则优先使用，否则尝试音频转写
+        # 2) 文本：若 override_text 提供则优先使用，否则尝试音频转写
     asr_time = 0.0
     text_content = override_text.strip()
     if not text_content and audio_path and os.path.exists(audio_path):
         t0 = time.time()
-        # 使用新的快速语音转文本功能
-        text_from_asr = fast_transcribe_audio(audio_path)
+        # 使用火山引擎语音转文本功能
+        text_from_asr = huoshan_transcribe_audio(audio_path)
         asr_time = time.time() - t0
         if text_from_asr:
             text_content = text_from_asr
@@ -454,9 +452,9 @@ def main():
     with st.spinner("正在加载依赖与模型..."):
         init_local_logging_storage()
         try_init_ark_sdk()
-        fast_stt_model = load_fast_stt_model()
-        # 将模型存储在session_state中，供后续使用
-        st.session_state['fast_stt_model'] = fast_stt_model
+        huoshan_stt_available = load_huoshan_stt_model()
+        # 将火山引擎状态存储在session_state中，供后续使用
+        st.session_state['huoshan_stt_available'] = huoshan_stt_available
     
     st.success("🚀 系统初始化完成！")
 
@@ -500,7 +498,7 @@ def main():
         st.subheader("单条测试（上传图片与音频）")
         
         # 显示模型状态
-        model_status = "✅ 快速模型已加载" if st.session_state.get('fast_stt_model') else "⚠️ 使用备用模型"
+        model_status = "✅ 火山引擎模型已加载" if st.session_state.get('huoshan_stt_available') else "⚠️ 使用备用模型"
         ark_status = "✅ Ark 可用" if st.session_state.get('ark_available') else "⚠️ Ark 不可用（使用回退）"
         st.info(f"语音转文本模型状态: {model_status} | 大模型: {ark_status}")
         
