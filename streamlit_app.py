@@ -488,6 +488,10 @@ def main():
         st.session_state['streaming_asr_available'] = streaming_asr_available
     
     st.success("🚀 系统初始化完成！")
+    
+    # 显示当前系统时间信息
+    current_time = datetime.now()
+    st.info(f"🕐 当前系统时间: {current_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
     # 移除 UI 内部设置 ARK_API_KEY 的入口，统一使用环境变量/Secrets
 
@@ -640,8 +644,13 @@ def main():
             save_btn = st.button("保存记录")
             if save_btn:
                 try:
+                    # 获取准确的系统时间
+                    current_timestamp = int(time.time())
+                    current_datetime = datetime.now()
+                    
                     payload = {
-                        "timestamp": int(time.time()),
+                        "timestamp": current_timestamp,
+                        "datetime_str": current_datetime.strftime('%Y-%m-%d %H:%M:%S'),
                         "user_mood": (st.session_state.get("user_mood_select") or None),
                         "user_note": (st.session_state.get("user_note_input") or None),
                         "override_text": st.session_state.get('last_override_text'),
