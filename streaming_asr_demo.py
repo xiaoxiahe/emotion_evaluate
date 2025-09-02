@@ -347,27 +347,77 @@ class AsrWsClient:
             header = self.token_auth()
         elif self.auth_method == "signature":
             header = self.signature_auth(full_client_request)
-        async with websockets.connect(self.ws_url, additional_headers=header, max_size=1000000000) as ws:
-            # 发送 full client request
-            await ws.send(full_client_request)
-            res = await ws.recv()
-            result = parse_response(res)
-            if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
-                return result
-            for seq, (chunk, last) in enumerate(AsrWsClient.slice_data(wav_data, segment_size), 1):
-                # if no compression, comment this line
-                payload_bytes = gzip.compress(chunk)
-                audio_only_request = bytearray(generate_audio_default_header())
-                if last:
-                    audio_only_request = bytearray(generate_last_audio_default_header())
-                audio_only_request.extend((len(payload_bytes)).to_bytes(4, 'big'))  # payload size(4 bytes)
-                audio_only_request.extend(payload_bytes)  # payload
-                # 发送 audio-only client request
-                await ws.send(audio_only_request)
+        # 兼容不同版本的websockets库
+        try:
+            # 新版本websockets
+            async with websockets.connect(self.ws_url, extra_headers=header, max_size=1000000000) as ws:
+                # 发送 full client request
+                await ws.send(full_client_request)
                 res = await ws.recv()
                 result = parse_response(res)
                 if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
                     return result
+                for seq, (chunk, last) in enumerate(AsrWsClient.slice_data(wav_data, segment_size), 1):
+                    # if no compression, comment this line
+                    payload_bytes = gzip.compress(chunk)
+                    audio_only_request = bytearray(generate_audio_default_header())
+                    if last:
+                        audio_only_request = bytearray(generate_last_audio_default_header())
+                    audio_only_request.extend((len(payload_bytes)).to_bytes(4, 'big'))  # payload size(4 bytes)
+                    audio_only_request.extend(payload_bytes)  # payload
+                    # 发送 audio-only client request
+                    await ws.send(audio_only_request)
+                    res = await ws.recv()
+                    result = parse_response(res)
+                    if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
+                        return result
+        except TypeError:
+            try:
+                # 旧版本websockets
+                async with websockets.connect(self.ws_url, additional_headers=header, max_size=1000000000) as ws:
+                    # 发送 full client request
+                    await ws.send(full_client_request)
+                    res = await ws.recv()
+                    result = parse_response(res)
+                    if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
+                        return result
+                    for seq, (chunk, last) in enumerate(AsrWsClient.slice_data(wav_data, segment_size), 1):
+                        # if no compression, comment this line
+                        payload_bytes = gzip.compress(chunk)
+                        audio_only_request = bytearray(generate_audio_default_header())
+                        if last:
+                            audio_only_request = bytearray(generate_last_audio_default_header())
+                        audio_only_request.extend((len(payload_bytes)).to_bytes(4, 'big'))  # payload size(4 bytes)
+                        audio_only_request.extend(payload_bytes)  # payload
+                        # 发送 audio-only client request
+                        await ws.send(audio_only_request)
+                        res = await ws.recv()
+                        result = parse_response(res)
+                        if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
+                            return result
+            except TypeError:
+                # 如果都不支持，尝试不使用headers
+                async with websockets.connect(self.ws_url, max_size=1000000000) as ws:
+                    # 发送 full client request
+                    await ws.send(full_client_request)
+                    res = await ws.recv()
+                    result = parse_response(res)
+                    if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
+                        return result
+                    for seq, (chunk, last) in enumerate(AsrWsClient.slice_data(wav_data, segment_size), 1):
+                        # if no compression, comment this line
+                        payload_bytes = gzip.compress(chunk)
+                        audio_only_request = bytearray(generate_audio_default_header())
+                        if last:
+                            audio_only_request = bytearray(generate_last_audio_default_header())
+                        audio_only_request.extend((len(payload_bytes)).to_bytes(4, 'big'))  # payload size(4 bytes)
+                        audio_only_request.extend(payload_bytes)  # payload
+                        # 发送 audio-only client request
+                        await ws.send(audio_only_request)
+                        res = await ws.recv()
+                        result = parse_response(res)
+                        if 'payload_msg' in result and result['payload_msg']['code'] != self.success_code:
+                            return result
         return result
 
     async def execute(self):
