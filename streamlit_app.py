@@ -40,26 +40,26 @@ from p2p_evaluate import (
     normalize_label,
 )
 
-# 预加载火山引擎语音转文本模型
+# 预加载火山引擎WebSocket语音转文本模型
 @st.cache_resource
-def load_huoshan_stt_model():
-    """预加载火山引擎语音转文本模型"""
+def load_streaming_asr_model():
+    """预加载火山引擎WebSocket语音转文本模型"""
     try:
-        from huoshan_quik import recognize_task
-        st.success("✅ 火山引擎语音转文本模型加载成功")
+        from streaming_asr_demo import AsrWsClient, execute_one
+        # st.success("✅ 火山引擎WebSocket语音转文本模型加载成功")
         return True
     except Exception as e:
-        st.warning(f"⚠️ 火山引擎语音转文本模型加载失败: {e}，将使用备用方案")
+        st.warning(f"⚠️ 火山引擎WebSocket语音转文本模型加载失败: {e}，将使用备用方案")
         return None
 
-# 火山引擎语音转文本函数
-def huoshan_transcribe_audio(audio_path: str) -> Optional[str]:
-    """使用火山引擎进行语音转文本"""
+# 火山引擎WebSocket语音转文本函数
+def streaming_asr_transcribe_audio(audio_path: str) -> Optional[str]:
+    """使用火山引擎WebSocket进行语音转文本"""
     if not audio_path or not os.path.exists(audio_path):
         return None
     
-    # 检查火山引擎模型是否可用
-    if not st.session_state.get('huoshan_stt_available'):
+    # 检查火山引擎WebSocket模型是否可用
+    if not st.session_state.get('streaming_asr_available'):
         # 备用方案：使用p2p_evaluate中的函数
         from p2p_evaluate import transcribe_audio_to_text
         return transcribe_audio_to_text(audio_path)
@@ -67,36 +67,68 @@ def huoshan_transcribe_audio(audio_path: str) -> Optional[str]:
     try:
         start_time = time.time()
         
-        # 使用火山引擎API进行语音识别
-        from huoshan_quik import recognize_task
-        response = recognize_task(file_path=audio_path)
+        # 使用火山引擎WebSocket API进行语音识别
+        from streaming_asr_demo import execute_one
+        
+        # 配置参数
+        kwargs = {
+            'appid': "5851744862",
+            'token': "HdMaaKvnrzQ4vuLGJ0tP2u_v5Xd97_Ho",
+            'cluster': "volcengine_input_common",
+            'format': "wav",
+            'language': "zh-CN",
+            'rate': 16000,
+            'bits': 16,
+            'channel': 1
+        }
+        
+        # 执行语音识别
+        result = execute_one(
+            {'id': 'streamlit_audio', 'path': audio_path},
+            cluster="volcengine_input_common",
+            **kwargs
+        )
         
         # 解析响应结果
-        if response.status_code == 200:
-            result_data = response.json()
-            # 根据火山引擎API的响应格式提取文本
-            # 这里需要根据实际的API响应格式进行调整
-            text_content = ""
-            if 'result' in result_data and 'text' in result_data['result']:
-                text_content = result_data['result']['text']
-            elif 'data' in result_data and 'text' in result_data['data']:
-                text_content = result_data['data']['text']
-            else:
-                # 如果无法解析，尝试备用方案
-                from p2p_evaluate import transcribe_audio_to_text
-                return transcribe_audio_to_text(audio_path)
-            
-            processing_time = time.time() - start_time
-            st.info(f"🎵 火山引擎语音转写完成 ({processing_time:.2f}秒)")
-            
-            return text_content if text_content.strip() else None
-        else:
-            # API调用失败，使用备用方案
+        recognized_text = ""
+        if 'result' in result and isinstance(result['result'], dict):
+            result_data = result['result']
+            if 'payload_msg' in result_data:
+                payload_msg = result_data['payload_msg']
+                if 'data' in payload_msg:
+                    data = payload_msg['data']
+                    if isinstance(data, list) and len(data) > 0:
+                        first_item = data[0]
+                        if isinstance(first_item, dict) and 'text' in first_item:
+                            recognized_text = first_item['text']
+                        elif isinstance(first_item, str):
+                            recognized_text = first_item
+                    elif isinstance(data, str):
+                        recognized_text = data
+                elif 'text' in payload_msg:
+                    recognized_text = payload_msg['text']
+                elif 'result' in payload_msg:
+                    result_data = payload_msg['result']
+                    if isinstance(result_data, list) and len(result_data) > 0:
+                        if isinstance(result_data[0], dict) and 'text' in result_data[0]:
+                            recognized_text = result_data[0]['text']
+                        elif isinstance(result_data[0], str):
+                            recognized_text = result_data[0]
+                    elif isinstance(result_data, str):
+                        recognized_text = result_data
+        
+        if not recognized_text:
+            # 如果无法解析，尝试备用方案
             from p2p_evaluate import transcribe_audio_to_text
             return transcribe_audio_to_text(audio_path)
         
+        processing_time = time.time() - start_time
+        st.info(f"🎵 火山引擎WebSocket语音转写完成 ({processing_time:.2f}秒)")
+        
+        return recognized_text if recognized_text.strip() else None
+        
     except Exception as e:
-        st.warning(f"火山引擎语音转写失败: {e}，使用备用方案")
+        st.warning(f"火山引擎WebSocket语音转写失败: {e}，使用备用方案")
         # 备用方案：使用p2p_evaluate中的函数
         from p2p_evaluate import transcribe_audio_to_text
         return transcribe_audio_to_text(audio_path)
@@ -414,13 +446,13 @@ def run_single_test(image_path: Optional[str], audio_path: Optional[str], overri
     if image_path and os.path.exists(image_path):
         v_pred, v_reason, v_time = predict_visual_detail(image_path)
 
-        # 2) 文本：若 override_text 提供则优先使用，否则尝试音频转写
+            # 2) 文本：若 override_text 提供则优先使用，否则尝试音频转写
     asr_time = 0.0
     text_content = override_text.strip()
     if not text_content and audio_path and os.path.exists(audio_path):
         t0 = time.time()
-        # 使用火山引擎语音转文本功能
-        text_from_asr = huoshan_transcribe_audio(audio_path)
+        # 使用火山引擎WebSocket语音转文本功能
+        text_from_asr = streaming_asr_transcribe_audio(audio_path)
         asr_time = time.time() - t0
         if text_from_asr:
             text_content = text_from_asr
@@ -452,9 +484,9 @@ def main():
     with st.spinner("正在加载依赖与模型..."):
         init_local_logging_storage()
         try_init_ark_sdk()
-        huoshan_stt_available = load_huoshan_stt_model()
-        # 将火山引擎状态存储在session_state中，供后续使用
-        st.session_state['huoshan_stt_available'] = huoshan_stt_available
+        streaming_asr_available = load_streaming_asr_model()
+        # 将火山引擎WebSocket状态存储在session_state中，供后续使用
+        st.session_state['streaming_asr_available'] = streaming_asr_available
     
     st.success("🚀 系统初始化完成！")
 
@@ -498,7 +530,7 @@ def main():
         st.subheader("单条测试（上传图片与音频）")
         
         # 显示模型状态
-        model_status = "✅ 火山引擎模型已加载" if st.session_state.get('huoshan_stt_available') else "⚠️ 使用备用模型"
+        model_status = "✅ 火山引擎WebSocket模型已加载" if st.session_state.get('streaming_asr_available') else "⚠️ 使用备用模型"
         ark_status = "✅ Ark 可用" if st.session_state.get('ark_available') else "⚠️ Ark 不可用（使用回退）"
         st.info(f"语音转文本模型状态: {model_status} | 大模型: {ark_status}")
         
