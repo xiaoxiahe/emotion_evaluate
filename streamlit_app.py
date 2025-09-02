@@ -797,40 +797,7 @@ def main():
                         else:
                             st.info("暂无音频可下载")
                 
-                # 显示最近一条的媒体示例（若存在路径）
-                try:
-                    last = df.iloc[0]
-                    media_cols = st.columns([1,1])
-                    with media_cols[0]:
-                        imgp = last.get("image_path") if "image_path" in df.columns else None
-                        if isinstance(imgp, str) and os.path.exists(imgp):
-                            st.image(imgp, caption="最近图片")
-                            # 添加单张图片下载
-                            with open(imgp, "rb") as f:
-                                img_data = f.read()
-                                img_ext = os.path.splitext(imgp)[1]
-                                st.download_button(
-                                    "📥 下载此图片",
-                                    data=img_data,
-                                    file_name=f"emotion_image_{last.get('id', 'unknown')}{img_ext}",
-                                    mime=f"image/{img_ext[1:]}"
-                                )
-                    with media_cols[1]:
-                        audiop = last.get("audio_path") if "audio_path" in df.columns else None
-                        if isinstance(audiop, str) and os.path.exists(audiop):
-                            with open(audiop, "rb") as f:
-                                audio_data = f.read()
-                                st.audio(audio_data)
-                                # 添加单个音频下载
-                                audio_ext = os.path.splitext(audiop)[1]
-                                st.download_button(
-                                    "📥 下载此音频",
-                                    data=audio_data,
-                                    file_name=f"emotion_audio_{last.get('id', 'unknown')}{audio_ext}",
-                                    mime=f"audio/{audio_ext[1:]}"
-                                )
-                except Exception as e:
-                    st.warning(f"显示媒体示例失败: {e}")
+
                 
                 # 媒体文件管理页面
                 st.markdown("### 🗂️ 媒体文件管理")
