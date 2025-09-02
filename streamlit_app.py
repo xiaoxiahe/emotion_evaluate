@@ -85,7 +85,6 @@ def streaming_asr_transcribe_audio(audio_path: str) -> Optional[str]:
         # 执行语音识别
         result = execute_one(
             {'id': 'streamlit_audio', 'path': audio_path},
-            cluster="volcengine_input_common",
             **kwargs
         )
         
