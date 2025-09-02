@@ -6,3 +6,4 @@ streamlit==1.49.0
 faster-whisper==1.2.0
 requests==2.32.3
 streamlit-mic-recorder
+websockets==12.0
